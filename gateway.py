@@ -11,6 +11,7 @@ class BotRegisterError(Exception):
 class BotError(Exception):
     ...
 
+
 class opcode:
     """ containts opcode literals """
     DISPATCH = 0
@@ -25,6 +26,15 @@ class opcode:
     HELLO = 10
     HEARTBEAT_ACK = 11
 
+async def _parse_as_raw(event): # if gateway.[event/unhandled_event](raw=True) is set nothing can overwrite this parser
+    return event
+
+async def _dummy_parser(event): # default event parser, will always be overwritten if something else is specified  
+    return event
+
+async def _dummy_callback(*args, **kwargs):
+    ...
+
 __bots__ = {}
 __bot_callbacks__ = {}
 __session_ids__ = {}
@@ -32,38 +42,42 @@ __session_ids__ = {}
 # Decorators tend to be evaluated first, so we need to catch the edge cases and ensure the handlers are saved before the bot is registered
 # As we cant assign a handler to a bot that doesn't exist
 # NOTE : this is a behavior that mainly occures when assigning function handlers that are a part of a class
-def unhandled_event(bot_alias=''):
+def unhandled_event(bot_alias='', event_parser=_dummy_parser, raw=False):
     """ All unhandled gateway event data will be sent to the decorated function. """
+    event_parser = _parse_as_raw if raw else event_parser
     def dummy(func):
         if bot_alias not in __bot_callbacks__:
-            __bot_callbacks__[bot_alias] = { 'event_handlers' : {'dummy' : _dummy_callback}, 'func_handlers' : { 'unhandled_event_callback' : _dummy_callback } }
+            __bot_callbacks__[bot_alias] = { 'event_handlers' : {'dummy' : (_dummy_callback, event_parser)}, 'func_handlers' : { 'unhandled_event_callbacks' : (_dummy_callback, event_parser) } }
         else:
-            __bot_callbacks__[bot_alias]['func_handlers']['unhandled_event_callback'] = func
+            __bot_callbacks__[bot_alias]['func_handlers']['unhandled_event_callbacks'] = (func, event_parser)
         return func
     return dummy
     
-def event(bot_alias=''):
+def event(bot_alias='', event_parser=_dummy_parser, raw=False):
     """
-    `@gateway.event('my_bot_alias' : optional)` `async def message_create(x):`
+    `@gateway.event('my_bot_alias' : optional, event_parser : optional)` `async def message_create(x):`
     
     Received `MESSAGE_CREATE` event data will be routed to the decorated function, in the above case it would be `message_create()`.
 
+    In the case of an `event_parser` being passed, the event data will first be parsed then sent to the decorated function.
+
     NOTE : function names MUST match event names, and are NOT case sensitive.
     """
+    event_parser = _parse_as_raw if raw else event_parser
     def dummy(func):
         if bot_alias not in __bot_callbacks__:
-            __bot_callbacks__[bot_alias] = { 'event_handlers' : {func.__name__.lower() : func}, 'func_handlers' : { 'unhandled_event_callback' : _dummy_callback } }
+            __bot_callbacks__[bot_alias] = { 'event_handlers' : {func.__name__.lower() : (func, event_parser)}, 'func_handlers' : { 'unhandled_event_callbacks' : (_dummy_callback, event_parser) } }
         else:
-            __bot_callbacks__[bot_alias]['event_handlers'][func.__name__.lower()] = func
+            __bot_callbacks__[bot_alias]['event_handlers'][func.__name__.lower()] = (func, event_parser)
         return func
     return dummy
 
-def register_bot(token : str, intents : int, alias=''):
+def register_bot(token : str, intents : int, alias='', event_parser=None):
     """registers a bots info allowing for websocket connection, this also registers defined handler functions such as `gateway.message_create()` using the `@gateway.event()` decorator"""
     if alias in __bots__:
         raise BotRegisterError(f"A bot with alias, '{alias}' already exists.")
     
-    __bots__[alias] = { "token" : token, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "ready_info" : {}, "func_handlers" : {'unhandled_event_callback' : _dummy_callback} ,"event_handlers" : {} }
+    __bots__[alias] = { "token" : token, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "ready_info" : {}, "func_handlers" : {'unhandled_event_callbacks' : (_dummy_callback, _dummy_parser)} ,"event_handlers" : {}, "event_parser" : event_parser }
     __bots__[alias].update(__bot_callbacks__[alias]) # Ensures that any pre-defined handlers are properly added to the bot
 
 def get_bot(bot_alias : str) -> dict:
@@ -144,7 +158,6 @@ def _get_resume_payload(bot_alias='') -> str:
     return json.dumps( { "op": 6,"d": { "token": get_token(bot_alias), "session_id": get_session_id(bot_alias), "seq":  _get_sequence(bot_alias) } } )
 
 
-
 def bot_stop(bot_alias=''):
     """ exits session, then closes bot """
     _set_session_code(-1, bot_alias)
@@ -155,12 +168,12 @@ def bot_restart(bot_alias='', opcode=opcode.INVALID_SESSION):
     _set_session_code(opcode, bot_alias)
     _set_session_state(False, bot_alias)
 
-async def _dummy_callback(*args, **kwargs):
-    ...
 
-async def _event_callback(callback, event : dict):
+async def _event_callback(callbacks : tuple, event : dict):
+    callback, parser = callbacks
     try:
-        await callback(event)
+        parsed_data = await parser(event)
+        await callback(parsed_data)
     except Exception as err:
         traceback.print_exc()
 
@@ -171,7 +184,7 @@ async def _cancel_tasks(bot_alias=''):
 async def _recv_handler(ws, event : dict, bot_alias : str) -> int:
     _set_sequence(event['s'] if 's' in event else 'null', bot_alias)
     opc = event['op']
-    callback = None
+    callbacks = None
     session_code = 0
 
     match opc:
@@ -179,9 +192,9 @@ async def _recv_handler(ws, event : dict, bot_alias : str) -> int:
             event_name = event['t'].lower()
             event_handlers = get_bot(bot_alias)['event_handlers']
             if event_name in event_handlers:
-                callback = event_handlers[event_name]
+                callbacks = event_handlers[event_name]
             else:
-                callback = get_bot(bot_alias)['func_handlers']['unhandled_event_callback']
+                callbacks = get_bot(bot_alias)['func_handlers']['unhandled_event_callbacks']
         
         case opcode.HEARTBEAT:
             await ws.send( json.dumps( {"op": 1, "d": None} ) )
@@ -192,8 +205,12 @@ async def _recv_handler(ws, event : dict, bot_alias : str) -> int:
         case _:
             session_code = opc
     
-    if callback is not None:
-        await _event_callback(callback, event)
+    if callbacks is not None:
+        # If a parser has been registered with the bot, use the registered parser only if one was not specified in the @gateway.event() decorator.
+        # -- eg. if the parser is specified here --> @gateway.event(event_parser=SpecificParser) <--- then use it, or else use what the bot was registered with
+        parser = get_bot(bot_alias)['event_parser']
+        callbacks = (callbacks[0], parser) if (parser is not None and callbacks[1] is _dummy_parser) else callbacks
+        await _event_callback(callbacks, event)
     
     return session_code
 

@@ -22,26 +22,35 @@ class Message:
         self.discriminator = msg.get('discriminator', '')
         self.user_id = msg.get('id', '')
         self.unique_username = f"{self.username}#{self.discriminator}"
+    
+    @classmethod
+    async def parse_event(cls, event):
+        return cls(event)
 
 class Bot():
-    def __init__(self, alias : str, token : str, intents : int) -> None:
+    def __init__(self, alias : str, token : str, intents : int, event_parser=None) -> None:
         self.alias = alias
         self.token = token
         self.intents = intents
-        gateway.register_bot(token, intents, alias)
+        gateway.register_bot(token, intents, alias, event_parser)
 
     def run(self, url='wss://gateway.discord.gg'):
         asyncio.run( gateway.bot(url, self.alias) )
 
-    @gateway.event()
-    async def message_create(x):
-        msg = Message(x)
+    @gateway.event(event_parser=Message.parse_event)
+    async def message_create(msg):
         print(msg.unique_username, msg.content)
     
     @gateway.unhandled_event()
     async def other(x):
-        print("Ignored Event : ", x['t'])
         print(x)
+
+async def parser(event):
+    event_name = event['t'].lower()
+    if event_name == "message_create":
+        return await Message.parse_event(event)
+    
+    return f"Ignored Event : {event['t']}"
 
 if __name__ == "__main__":
     url = 'wss://gateway.discord.gg'
@@ -50,7 +59,6 @@ if __name__ == "__main__":
 
     bot = Bot('', token, intents)
     bot.run()
-
 
     # gateway.register_bot( token, intents)
 
