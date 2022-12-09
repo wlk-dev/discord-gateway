@@ -26,7 +26,10 @@ class opcode:
     HELLO = 10
     HEARTBEAT_ACK = 11
 
-async def _dummy_parser(event):
+async def _parse_as_raw(event): # if gateway.[event/unhandled_event](raw=True) is set nothing can overwrite this parser
+    return event
+
+async def _dummy_parser(event): # default event parser, will always be overwritten if something else is specified  
     return event
 
 async def _dummy_callback(*args, **kwargs):
@@ -39,8 +42,9 @@ __session_ids__ = {}
 # Decorators tend to be evaluated first, so we need to catch the edge cases and ensure the handlers are saved before the bot is registered
 # As we cant assign a handler to a bot that doesn't exist
 # NOTE : this is a behavior that mainly occures when assigning function handlers that are a part of a class
-def unhandled_event(bot_alias='', event_parser=_dummy_parser):
+def unhandled_event(bot_alias='', event_parser=_dummy_parser, raw=False):
     """ All unhandled gateway event data will be sent to the decorated function. """
+    event_parser = _parse_as_raw if raw else event_parser
     def dummy(func):
         if bot_alias not in __bot_callbacks__:
             __bot_callbacks__[bot_alias] = { 'event_handlers' : {'dummy' : (_dummy_callback, event_parser)}, 'func_handlers' : { 'unhandled_event_callbacks' : (_dummy_callback, event_parser) } }
@@ -49,7 +53,7 @@ def unhandled_event(bot_alias='', event_parser=_dummy_parser):
         return func
     return dummy
     
-def event(bot_alias='', event_parser=_dummy_parser):
+def event(bot_alias='', event_parser=_dummy_parser, raw=False):
     """
     `@gateway.event('my_bot_alias' : optional, event_parser : optional)` `async def message_create(x):`
     
@@ -59,6 +63,7 @@ def event(bot_alias='', event_parser=_dummy_parser):
 
     NOTE : function names MUST match event names, and are NOT case sensitive.
     """
+    event_parser = _parse_as_raw if raw else event_parser
     def dummy(func):
         if bot_alias not in __bot_callbacks__:
             __bot_callbacks__[bot_alias] = { 'event_handlers' : {func.__name__.lower() : (func, event_parser)}, 'func_handlers' : { 'unhandled_event_callbacks' : (_dummy_callback, event_parser) } }
@@ -67,12 +72,12 @@ def event(bot_alias='', event_parser=_dummy_parser):
         return func
     return dummy
 
-def register_bot(token : str, intents : int, alias=''):
+def register_bot(token : str, intents : int, alias='', event_parser=None):
     """registers a bots info allowing for websocket connection, this also registers defined handler functions such as `gateway.message_create()` using the `@gateway.event()` decorator"""
     if alias in __bots__:
         raise BotRegisterError(f"A bot with alias, '{alias}' already exists.")
     
-    __bots__[alias] = { "token" : token, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "ready_info" : {}, "func_handlers" : {'unhandled_event_callbacks' : (_dummy_callback, _dummy_parser)} ,"event_handlers" : {} }
+    __bots__[alias] = { "token" : token, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "ready_info" : {}, "func_handlers" : {'unhandled_event_callbacks' : (_dummy_callback, _dummy_parser)} ,"event_handlers" : {}, "event_parser" : event_parser }
     __bots__[alias].update(__bot_callbacks__[alias]) # Ensures that any pre-defined handlers are properly added to the bot
 
 def get_bot(bot_alias : str) -> dict:
@@ -201,6 +206,10 @@ async def _recv_handler(ws, event : dict, bot_alias : str) -> int:
             session_code = opc
     
     if callbacks is not None:
+        # If a parser has been registered with the bot, use the registered parser only if one was not specified in the @gateway.event() decorator.
+        # -- eg. if the parser is specified here --> @gateway.event(event_parser=SpecificParser) <--- then use it, or else use what the bot was registered with
+        parser = get_bot(bot_alias)['event_parser']
+        callbacks = (callbacks[0], parser) if (parser is not None and callbacks[1] is _dummy_parser) else callbacks
         await _event_callback(callbacks, event)
     
     return session_code
