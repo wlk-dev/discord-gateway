@@ -11,7 +11,6 @@ class BotRegisterError(Exception):
 class BotError(Exception):
     ...
 
-
 class opcode:
     """ containts opcode literals """
     DISPATCH = 0
@@ -72,12 +71,12 @@ def event(bot_alias='', event_parser=_dummy_parser, raw=False):
         return func
     return dummy
 
-def register_bot(token : str, intents : int, alias='', event_parser=None):
+def register_bot(token : str, intents : int, alias='', event_parser=None, obj_instance=None):
     """registers a bots info allowing for websocket connection, this also registers defined handler functions such as `gateway.message_create()` using the `@gateway.event()` decorator"""
     if alias in __bots__:
         raise BotRegisterError(f"A bot with alias, '{alias}' already exists.")
     
-    __bots__[alias] = { "token" : token, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "ready_info" : {}, "func_handlers" : {'unhandled_event_callbacks' : (_dummy_callback, _dummy_parser)} ,"event_handlers" : {}, "event_parser" : event_parser }
+    __bots__[alias] = { "token" : token, "obj_instance" : obj_instance, "session_id" : '',  "session_state" : True, "session_code" : 0, "session_sequence" : 0,  "bot_intents" : intents, "hb_info" : (0,0), "tasks" : [], "queue" : asyncio.Queue(), "ready_info" : {}, "func_handlers" : {'unhandled_event_callbacks' : (_dummy_callback, _dummy_parser)} ,"event_handlers" : {}, "event_parser" : event_parser }
     __bots__[alias].update(__bot_callbacks__[alias]) # Ensures that any pre-defined handlers are properly added to the bot
 
 def get_bot(bot_alias : str) -> dict:
@@ -168,12 +167,16 @@ def bot_restart(bot_alias='', opcode=opcode.INVALID_SESSION):
     _set_session_code(opcode, bot_alias)
     _set_session_state(False, bot_alias)
 
+async def bot_send(payload : dict, bot_alias=''):
+    get_bot(bot_alias)['queue'].put(payload)
 
-async def _event_callback(callbacks : tuple, event : dict):
+async def _event_callback(callbacks : tuple, event : dict, bot_alias=''):
+    instance = get_bot(bot_alias)['obj_instance']
     callback, parser = callbacks
     try:
-        parsed_data = await parser(event)
-        await callback(parsed_data)
+        event_data = await parser(event)
+        data = (instance, event_data) if instance is not None else (event_data,)
+        await callback(*data)
     except Exception as err:
         traceback.print_exc()
 
@@ -210,7 +213,7 @@ async def _recv_handler(ws, event : dict, bot_alias : str) -> int:
         # -- eg. if the parser is specified here --> @gateway.event(event_parser=SpecificParser) <--- then use it, or else use what the bot was registered with
         parser = get_bot(bot_alias)['event_parser']
         callbacks = (callbacks[0], parser) if (parser is not None and callbacks[1] is _dummy_parser) else callbacks
-        await _event_callback(callbacks, event)
+        await _event_callback(callbacks, event, bot_alias)
     
     return session_code
 
@@ -227,6 +230,24 @@ async def _recv_loop(ws, bot_alias : str):
 
     finally:
         await _cancel_tasks(bot_alias)
+
+async def _send_loop(ws, bot_alias : str):
+    queue = get_bot(bot_alias)['queue']
+    try:
+        while _get_session_state(bot_alias):
+            msg = await queue.get()
+            await ws.send( json.dumps(msg) )
+
+    except json.JSONDecodeError:
+        traceback.print_exc()
+
+    except asyncio.CancelledError:
+        pass
+
+    finally:
+        ...
+        # await _cancel_tasks(bot_alias)
+        # look into Queue clearing if need be
 
 async def _ping_loop(ws, bot_alias : str):
     jitter, hb_info = True, _get_hb_info(bot_alias)
@@ -274,9 +295,10 @@ async def init_connection(bot_alias : str, gateway_url : str):
 
             ping = asyncio.create_task( _ping_loop(ws, bot_alias) )
             recv = asyncio.create_task( _recv_loop(ws, bot_alias) )
+            send = asyncio.create_task( _send_loop(ws, bot_alias) )
 
-            get_bot(bot_alias)['tasks'] = (ping, recv)
-            await ping, recv
+            get_bot(bot_alias)['tasks'] = (ping, recv, send)
+            await ping, recv, send
         
         await ws.close()
 
