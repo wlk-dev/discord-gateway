@@ -22,6 +22,10 @@ class Message:
         self.discriminator = msg.get('discriminator', '')
         self.user_id = msg.get('id', '')
         self.unique_username = f"{self.username}#{self.discriminator}"
+    
+    @classmethod
+    async def parse_event(cls, event):
+        return cls(event)
 
 class Bot():
     def __init__(self, alias : str, token : str, intents : int) -> None:
@@ -33,9 +37,8 @@ class Bot():
     def run(self, url='wss://gateway.discord.gg'):
         asyncio.run( gateway.bot(url, self.alias) )
 
-    @gateway.event()
-    async def message_create(x):
-        msg = Message(x)
+    @gateway.event(event_parser=Message.parse_event)
+    async def message_create(msg):
         print(msg.unique_username, msg.content)
     
     @gateway.unhandled_event()
