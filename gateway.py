@@ -11,7 +11,6 @@ class BotRegisterError(Exception):
 class BotError(Exception):
     ...
 
-
 class opcode:
     """ containts opcode literals """
     DISPATCH = 0

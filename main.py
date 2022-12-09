@@ -1,8 +1,6 @@
 import gateway, asyncio, os
 from dotenv import load_dotenv
 
-load_dotenv()
-
 class Message:
     def __init__(self, message_json : dict) -> None:
         self.is_dm = not ( "guild_id" in message_json['d'] )
@@ -53,6 +51,8 @@ async def parser(event):
     return f"Ignored Event : {event['t']}"
 
 if __name__ == "__main__":
+    load_dotenv()
+
     url = 'wss://gateway.discord.gg'
     token = os.environ['bot_token']
     intents = 10 << 12
