@@ -87,8 +87,7 @@ if __name__ == "__main__":
     # load_dotenv()
 
     url = 'wss://gateway.discord.gg'
-    # token = os.environ['bot_token']
-    token = "NzgyNzYyNTQ2Mzc3NTIzMjEx.Gu1wH_.4cIiISwRA6qsbG1eHoLkQbOzIdXHmezorD4M_g"
+    token = os.environ['bot_token']
     intents = 10 << 12
     
 
