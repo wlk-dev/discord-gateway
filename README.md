@@ -1,5 +1,5 @@
 # Discord Gateway
-This Python module provides an advanced implementation of the Discord Gateway, enabling the creation and management of Discord bot connections. The module includes functions for connecting, restarting, stopping, and sending messages to the Discord Gateway, as well as event handling, parsing, and managing bot sessions. It is designed for performance and flexibility, with support for multiple bots and customizable event parsers.
+This Python module provides an advanced implementation of the Discord Gateway, enabling the creation and management of Discord gateway(bot) connections. The module includes functions for connecting, restarting, stopping, and sending messages to the Discord Gateway, as well as event handling, parsing, and managing gateway(bot) sessions. It is designed for performance and flexibility, with support for multiple connections and customizable event parsers.
 
 ## Features
 - Register and manage multiple bots with aliases for easy identification
