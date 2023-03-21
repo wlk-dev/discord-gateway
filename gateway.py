@@ -1,5 +1,5 @@
 from random import random as _ran_random
-from typing import Any, Callable, Coroutine, Dict
+from typing import Callable
 
 import traceback
 import websockets
@@ -30,15 +30,15 @@ class opcode:
     HEARTBEAT_ACK = 11
 
 
-async def _default_parser(event: Dict[str, Any]) -> Dict[str, Any]:
+async def _default_parser(event: dict[str, any]) -> dict[str, any]:
     """
     Default event parser. Will always be overwritten if something else is specified.
 
     Args:
-        event (Dict[str, Any]): The event data.
+        event (dict[str, any]): The event data.
 
     Returns:
-        Dict[str, Any]: The event data.
+        dict[str, any]: The event data.
     """
     return event
 
@@ -66,7 +66,7 @@ def unhandled_event(bot_alias: str = '', event_parser: Callable = _default_parse
     Args:
         bot_alias (str, optional): The bot alias. Defaults to ''.
         event_parser (Callable, optional): The event parser function. Defaults to _default_parser.
-        raw (bool, optional): Whether to use the raw event data. Defaults to False.
+        raw (bool, optional): If set to True, this parameter disables the current parser and uses the raw event data for the decorated function. If set to False (default), the current parser is used.
 
     Returns:
         Callable: The decorator function.
@@ -89,23 +89,26 @@ def event(bot_alias: str = '', event_parser: Callable = _default_parser, raw: bo
     """
     Decorator for gateway event handlers.
 
-    Usage: `@event('my_bot_alias', event_parser=_my_parser)` `async def message_create(x):`
+    This decorator routes the received event data to the decorated function, based on the event name.
+    If an `event_parser` is specified, the event data will be parsed before being sent to the decorated function.
+    
+    Usage:
+    ```
+    @event('my_bot_alias', event_parser=_my_parser)
+    async def message_create(x):
+    ```
 
-    Received `MESSAGE_CREATE` event data will be routed to the decorated function, in the above case it would be
-    `message_create()`.
-
-    If an `event_parser` is passed, the event data will first be parsed then sent to the decorated function.
-
-    NOTE : function names MUST match event names, and are NOT case sensitive.
+    NOTE: Function names must match event names and are not case sensitive.
 
     Args:
-        bot_alias (str, optional): The bot alias. Defaults to ''.
-        event_parser (Callable, optional): The event parser function. Defaults to _default_parser.
+        bot_alias (str, optional): Alias of the bot. Defaults to ''.
+        event_parser (Callable, optional): Function to parse the event data. Defaults to _default_parser.
         raw (bool, optional): Whether to use the raw event data. Defaults to False.
 
     Returns:
         Callable: The decorator function.
     """
+
     event_parser = _default_parser if raw else event_parser
 
     def dummy(func: Callable) -> Callable:
@@ -120,7 +123,7 @@ def event(bot_alias: str = '', event_parser: Callable = _default_parser, raw: bo
 
     return dummy
 
-def register_bot(token: str, intents: int, alias: str = '', event_parser: Callable = None, obj_instance: Any = None) -> None:
+def register_bot(token: str, intents: int, alias: str = '', event_parser: Callable = None, obj_instance: any = None) -> None:
     """
     Registers a bot's info allowing for websocket connection.
     This also registers defined handler functions such as `gateway.message_create()` using the `@event()` decorator.
@@ -130,11 +133,12 @@ def register_bot(token: str, intents: int, alias: str = '', event_parser: Callab
         intents (int): The bot intents.
         alias (str, optional): The bot alias. Defaults to ''.
         event_parser (Callable, optional): The event parser function. Defaults to None.
-        obj_instance (Any, optional): The bot instance object. Defaults to None.
+        obj_instance (any, optional): An instance of the class containing methods decorated with the `@event()` decorator, if any. Defaults to None.
 
     Raises:
         BotRegisterError: If a bot with the given alias already exists.
     """
+
     if alias in __bots__:
         raise BotRegisterError(f"A bot with alias, '{alias}' already exists.")
 
@@ -321,11 +325,11 @@ def bot_restart(bot_alias='', opcode=opcode.INVALID_SESSION):
 
 async def bot_send(payload: dict, bot_alias=''):
     """
-    Add a payload to the queue of the bot with the given bot alias.
+    Add a payload to the send queue of the bot with the given bot alias.
 
     Args:
         payload (dict): The payload to send.
-        bot_alias (str): The alias of the bot to send the payload to. Defaults to an empty string.
+        bot_alias (str): The alias of the bot for which queue the payload should be added to. Defaults to an empty string.
     """
     get_bot(bot_alias)['queue'].put(payload)
 
